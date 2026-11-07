@@ -7,11 +7,13 @@
 #   make run      # build and run demo
 #   make bench    # build and run benchmark (vs zlib/zstd)
 #   make fuzz     # build and run fuzz test
+#   make cli      # build command-line interface (tools/miniz_cli)
 #   make clean    # remove build/
 
 CXX      ?= g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 SRC_DIR  := examples
+TOOLS_DIR:= tools
 INC_DIR  := include
 BUILD_DIR:= build
 
@@ -19,13 +21,15 @@ DEMO_SRC  := $(SRC_DIR)/simple.cpp
 TEST_SRC  := $(SRC_DIR)/test.cpp
 BENCH_SRC := $(SRC_DIR)/benchmark.cpp
 FUZZ_SRC  := $(SRC_DIR)/fuzz.cpp
+CLI_SRC   := $(TOOLS_DIR)/miniz_cli.cpp
 
 TARGET_DEMO := $(BUILD_DIR)/miniz_demo
 TARGET_TEST := $(BUILD_DIR)/miniz_test
 TARGET_BENCH:= $(BUILD_DIR)/miniz_bench
 TARGET_FUZZ := $(BUILD_DIR)/miniz_fuzz
+TARGET_CLI  := $(BUILD_DIR)/miniz_cli
 
-.PHONY: all test run bench fuzz clean
+.PHONY: all test run bench fuzz cli clean
 
 all: $(TARGET_DEMO) $(TARGET_TEST)
 
@@ -40,6 +44,9 @@ $(TARGET_BENCH): $(BENCH_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INC_DIR) $< -lz -lzstd -o $@
 
 $(TARGET_FUZZ): $(FUZZ_SRC) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INC_DIR) $< -o $@
+
+$(TARGET_CLI): $(CLI_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INC_DIR) $< -o $@
 
 # ---- order-only prerequisite: create build dir ----
@@ -63,6 +70,9 @@ bench: $(TARGET_BENCH)
 
 fuzz: $(TARGET_FUZZ)
 	@./$(TARGET_FUZZ)
+
+cli: $(TARGET_CLI)
+	@echo "CLI built at $(TARGET_CLI)"
 
 clean:
 ifneq ($(OS),Windows_NT)

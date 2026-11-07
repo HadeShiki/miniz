@@ -75,3 +75,24 @@ jobs:
           make clean
           make CXX=clang++ all 2>&1 | tee build.log
           test $(grep -c "warning" build.log) -eq 0 || { echo "WARNINGS FOUND"; exit 1; }
+
+  sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ clang++ zlib1g-dev libzstd-dev make
+
+      - name: Build with ASAN + UBSAN (g++)
+        run: |
+          make clean
+          CXX=g++ CXXFLAGS="-std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra" make all test fuzz
+
+      - name: Build with ASAN + UBSAN (clang++)
+        run: |
+          make clean
+          CXX=clang++ CXXFLAGS="-std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra" make all test fuzz
