@@ -14,7 +14,6 @@ LZSS + optional Huffman compression library (header-only, C++17).
 | **CRC-32** | Integrity checksum for stored/transmitted data |
 | **Streaming** | `StreamEnc` / `StreamDec` for chunked compress/decompress |
 | **STL allocator** | `Allocator<T>` for `std::vector` etc. |
-| **License** | MIT |
 
 ## Build
 
