@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        compiler: [g++, clang++]
+        exclude:
+          # clang++ on Windows via MSYS2 can be flaky; keep matrix small
+          - os: windows-latest
+            compiler: clang++
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ clang++ zlib1g-dev libzstd-dev make
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install zlib zstd || true
+
+      - name: Build and run tests
+        run: |
+          make clean
+          make CXX=${{ matrix.compiler }} all
+          make CXX=${{ matrix.compiler }} test
+
+      - name: Run demo
+        run: |
+          make CXX=${{ matrix.compiler }} run
+
+      - name: Run benchmark (requires zlib + zstd)
+        if: runner.os != 'macOS' || true
+        run: |
+          make CXX=${{ matrix.compiler }} bench || true
+
+      - name: Run fuzz test
+        run: |
+          make CXX=${{ matrix.compiler }} fuzz
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ clang++ zlib1g-dev libzstd-dev make
+
+      - name: Verify zero warnings with g++
+        run: |
+          make clean
+          make CXX=g++ all 2>&1 | tee build.log
+          test $(grep -c "warning" build.log) -eq 0 || { echo "WARNINGS FOUND"; exit 1; }
+
+      - name: Verify zero warnings with clang++
+        run: |
+          make clean
+          make CXX=clang++ all 2>&1 | tee build.log
+          test $(grep -c "warning" build.log) -eq 0 || { echo "WARNINGS FOUND"; exit 1; }

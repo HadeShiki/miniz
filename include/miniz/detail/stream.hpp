@@ -71,7 +71,7 @@ struct StreamEnc {
     // must call miniz_buf_free(out) when done.
     inline bool finish(bool use_huff) noexcept {
         ByteBuf lz;
-        if (!lzss_encode(raw.begin(), raw.length(), lz)) return false;
+        if (!lzss_encode(raw.begin(), raw.length(), lz, CompressLevel::NORMAL)) return false;
 
         const uint8_t* payload = lz.begin();
         size_t payload_len = lz.length();

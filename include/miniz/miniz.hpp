@@ -80,16 +80,15 @@ static constexpr uint32_t MAGIC_LE = 0x00325A4Du; // "MZ2\0" little-endian
 
 // Rationale: compress returns an allocated ByteBuf; caller must call
 // miniz_buf_free when done. Ownership is explicit; no hidden allocations
-// inside the function. level controls encode effort only.
+// inside the function. level controls encode effort: FAST accepts first
+// valid match, NORMAL walks hash chain for best match.
 inline bool compress(const uint8_t* in, size_t in_len, ByteBuf& out,
                      CompressLevel level = DEFAULT_LEVEL) noexcept {
-    (void)level; // level currently affects FAST vs NORMAL scan; NORMAL
-                 // is implemented in lzss.hpp; FAST path reserved.
     out.clear();
 
-    // LZSS encode first
+    // LZSS encode first (level affects match search effort only)
     ByteBuf lz;
-    if (!lzss_encode(in, in_len, lz)) return false;
+    if (!lzss_encode(in, in_len, lz, level)) return false;
 
     // Try Huffman; keep the smaller of the two
     ByteBuf hz;
