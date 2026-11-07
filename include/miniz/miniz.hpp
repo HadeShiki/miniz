@@ -179,6 +179,144 @@ inline bool decompress(const uint8_t* in, size_t in_len,
 }
 
 // ---------------------------------------------------------------------------
+// Dictionary mode — prepend dictionary to input before compression so
+// matches can reference dictionary data. Dictionary is stored in the
+// output so every compressed frame is self-contained.
+// Format: [MAGIC][method=2][dict_len u32][orig_size u32][compressed(dict+input)]
+// ---------------------------------------------------------------------------
+
+inline bool compress_dict(const uint8_t* dict, size_t dict_len,
+                          const uint8_t* in, size_t in_len,
+                          ByteBuf& out, CompressLevel level = DEFAULT_LEVEL) noexcept {
+    out.clear();
+
+    // Combined buffer: [dict data][input data]
+    size_t combined_len = dict_len + in_len;
+    uint8_t* combined = static_cast<uint8_t*>(std::malloc(combined_len ? combined_len : 1));
+    if (!combined) return false;
+    if (dict_len > 0) std::memcpy(combined, dict, dict_len);
+    if (in_len > 0) std::memcpy(combined + dict_len, in, in_len);
+
+    // LZSS encode on combined stream — hash tables built naturally from
+    // dictionary data, so matches can reference dictionary positions.
+    ByteBuf lz;
+    if (!lzss_encode(combined, combined_len, lz, level)) {
+        std::free(combined);
+        return false;
+    }
+    std::free(combined);
+
+    // Try Huffman
+    ByteBuf hz;
+    bool use_huff = false;
+    if (combined_len > 0) {
+        if (huff_encode(lz.begin(), lz.length(), hz)) {
+            if (hz.length() < lz.length()) use_huff = true;
+        }
+    }
+
+    // Header: [MAGIC][method=2][dict_len][orig_size][huff_flag]
+    uint8_t hdr[10];
+    hdr[0] = static_cast<uint8_t>((MAGIC_LE >> 0) & 0xFF);
+    hdr[1] = static_cast<uint8_t>((MAGIC_LE >> 8) & 0xFF);
+    hdr[2] = static_cast<uint8_t>((MAGIC_LE >> 16) & 0xFF);
+    hdr[3] = static_cast<uint8_t>((MAGIC_LE >> 24) & 0xFF);
+    hdr[4] = 2u; // method 2 = dictionary
+    hdr[5] = static_cast<uint8_t>((dict_len >> 0) & 0xFF);
+    hdr[6] = static_cast<uint8_t>((dict_len >> 8) & 0xFF);
+    hdr[7] = static_cast<uint8_t>((dict_len >> 16) & 0xFF);
+    hdr[8] = static_cast<uint8_t>((dict_len >> 24) & 0xFF);
+    hdr[9] = use_huff ? 1u : 0u;
+
+    if (!out.append(hdr, 10)) { miniz_buf_free(lz); miniz_buf_free(hz); return false; }
+
+    // orig_size u32 LE (original input size, NOT including dictionary)
+    uint8_t sz[4];
+    sz[0] = static_cast<uint8_t>((in_len >> 0) & 0xFF);
+    sz[1] = static_cast<uint8_t>((in_len >> 8) & 0xFF);
+    sz[2] = static_cast<uint8_t>((in_len >> 16) & 0xFF);
+    sz[3] = static_cast<uint8_t>((in_len >> 24) & 0xFF);
+    if (!out.append(sz, 4)) { miniz_buf_free(lz); miniz_buf_free(hz); return false; }
+
+    if (use_huff) {
+        if (!out.append(hz.begin(), hz.length())) { miniz_buf_free(lz); miniz_buf_free(hz); return false; }
+    } else {
+        if (!out.append(lz.begin(), lz.length())) { miniz_buf_free(lz); miniz_buf_free(hz); return false; }
+    }
+    miniz_buf_free(lz);
+    miniz_buf_free(hz);
+    return true;
+}
+
+inline bool decompress_dict(const uint8_t* in, size_t in_len,
+                            uint8_t* out, size_t out_cap, size_t& out_written) noexcept {
+    out_written = 0;
+    if (in_len < 14) { fprintf(stderr, "[miniz] dict stream too short\n"); std::abort(); }
+
+    if (std::memcmp(in, "MZ2\0", 4) != 0) {
+        fprintf(stderr, "[miniz] bad magic\n");
+        std::abort();
+    }
+
+    uint8_t method = in[4];
+    if (method != 2) {
+        fprintf(stderr, "[miniz] not a dictionary stream (method=%u)\n", method);
+        std::abort();
+    }
+
+    uint32_t dict_len = static_cast<uint32_t>(in[5]) |
+                        (static_cast<uint32_t>(in[6]) << 8) |
+                        (static_cast<uint32_t>(in[7]) << 16) |
+                        (static_cast<uint32_t>(in[8]) << 24);
+
+    uint32_t orig_size = static_cast<uint32_t>(in[10]) |
+                         (static_cast<uint32_t>(in[11]) << 8) |
+                         (static_cast<uint32_t>(in[12]) << 16) |
+                         (static_cast<uint32_t>(in[13]) << 24);
+
+    uint8_t huff_flag = in[13];
+
+    const uint8_t* payload = in + 14;
+    size_t payload_len = in_len - 14;
+
+    // Decompressed size = dict_len + orig_size
+    size_t total_size = static_cast<size_t>(dict_len) + static_cast<size_t>(orig_size);
+
+    // Decompress into a temporary buffer that holds dict + input
+    uint8_t* temp = static_cast<uint8_t*>(std::malloc(total_size ? total_size : 1));
+    if (!temp) { fprintf(stderr, "[miniz] temp alloc failed\n"); std::abort(); }
+
+    size_t temp_written = 0;
+    bool ok;
+
+    if (huff_flag == 1) {
+        ok = huff_decode(payload, payload_len, temp, total_size, temp_written);
+    } else {
+        ok = lzss_decode(payload, payload_len, temp, total_size, temp_written);
+    }
+
+    if (ok && temp_written != total_size) {
+        fprintf(stderr, "[miniz] dict size mismatch: got %zu, want %zu\n", temp_written, total_size);
+        ok = false;
+    }
+
+    if (ok) {
+        // Skip dictionary prefix, copy original input to output
+        if (orig_size > out_cap) {
+            fprintf(stderr, "[miniz] output buffer too small for orig_size\n");
+            ok = false;
+        } else {
+            std::memcpy(out, temp + dict_len, static_cast<size_t>(orig_size));
+            out_written = static_cast<size_t>(orig_size);
+        }
+    }
+
+    std::free(temp);
+    if (!ok) return false;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // CRC-32 integrity checksum (public wrappers)
 // ---------------------------------------------------------------------------
 

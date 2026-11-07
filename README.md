@@ -51,28 +51,7 @@ int main() {
 }
 ```
 
-## Project structure
 
-```
-miniz/
-├── Makefile
-├── LICENSE
-├── README.md
-├── include/miniz/miniz.hpp          # public API
-├── include/miniz/detail/buffer.hpp  # ByteBuf
-├── include/miniz/detail/level.hpp   # CompressLevel
-├── include/miniz/detail/crc32.hpp   # CRC-32
-├── include/miniz/detail/lzss.hpp    # LZSS
-├── include/miniz/detail/huffman.hpp # Huffman
-├── include/miniz/detail/stream.hpp  # StreamEnc / StreamDec
-└── examples/
-    ├── simple.cpp
-    ├── allocator.cpp
-    ├── level_crc.cpp
-    ├── stream.cpp
-    └── test.cpp
-```
+## LICENSE
 
-## Author
-
-HadeShiki — MIT License
+MIT. See [LICENSE](LICENSE) for details.
